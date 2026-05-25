@@ -1,0 +1,41 @@
+# self-test.yml — CI for operatum-ci itself.
+#
+# Status (KB-7 PR B initial scaffold): runs the in-repo unit tests
+# for the composite actions + lints the workflow YAMLs with
+# actionlint. The full self-test that invokes both reusable
+# workflows against fixtures/minimal-app with a stubbed callback
+# receiver lands in a follow-up commit (per plan commit 13).
+
+name: self-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+        if: hashFiles('test/**/*.test.mjs', 'test/**/*.test.js') != ''
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run actionlint
+        shell: bash
+        run: |
+          # Install actionlint (single static binary, ~3MB)
+          curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash \
+            | bash -s -- 1.7.4
+          ./actionlint -color
