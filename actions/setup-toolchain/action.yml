@@ -1,0 +1,28 @@
+name: setup-toolchain
+description: >-
+  Detects the tenant repo's Node version and package manager from
+  the lockfile + .nvmrc + engines block. Emits outputs the
+  downstream cache/install steps consume. PR B is Node-only;
+  detect.mjs is the seam for a future Python/Go/Ruby extension.
+outputs:
+  node_version:
+    description: "Node major version (e.g. '20')"
+    value: ${{ steps.detect.outputs.node_version }}
+  package_manager:
+    description: "One of 'npm' | 'pnpm' | 'yarn'"
+    value: ${{ steps.detect.outputs.package_manager }}
+  has_playwright:
+    description: "'true' if @playwright/test is in package.json dependencies/devDependencies"
+    value: ${{ steps.detect.outputs.has_playwright }}
+
+runs:
+  using: composite
+  steps:
+    - name: Detect Node + package manager
+      id: detect
+      shell: bash
+      run: node "${{ github.action_path }}/detect.mjs"
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ steps.detect.outputs.node_version }}
