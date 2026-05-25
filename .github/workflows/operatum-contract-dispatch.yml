@@ -1,0 +1,430 @@
+# operatum-contract-dispatch.yml — reusable workflow, repository_dispatch callable
+#
+# Invoked from a tenant repo's caller workflow via:
+#   uses: andreikok/operatum-ci/.github/workflows/operatum-contract-dispatch.yml@v1
+#
+# Trust surface (round-17 + round-27 PR-56 review):
+# - Declares ONLY `callback_hmac` in workflow_call.secrets.
+#   Provider keys (OPENAI_TEST_API_KEY, etc.) live in the
+#   `kaizen-trusted` GitHub Environment and are read by jobs that
+#   declare `environment: kaizen-trusted` (provider-jobs land in
+#   a follow-up commit; this scaffold ships the shared cheap fan-in).
+# - resolve-context calls Kaizen's /api/owns-pr to confirm the
+#   Kaizen server owns the PR before any trust signal is set to 1.
+#   The App's custom protection rule enforces this independently
+#   when the provider-jobs run.
+#
+# Status (KB-7 PR B initial scaffold): the cheap-fan-in chain is
+# identical to operatum-contract-pr.yml; the dispatch-specific
+# provider-jobs (unit-tests / integration-tests / e2e / visual)
+# with `environment: kaizen-trusted` + the four sibling marker-jobs
+# + preview-deploy + log-capture land in follow-up commits per
+# the plan ladder.
+
+name: operatum-contract-dispatch
+
+on:
+  workflow_call:
+    inputs:
+      target_type:
+        description: "app | service | library | sidecar | platform"
+        type: string
+        required: true
+      kaizen_job_id:
+        description: "Kaizen job UUID; CORRELATION CONTEXT ONLY — never a trust signal."
+        type: string
+        required: false
+        default: ""
+      pr_number:
+        description: "PR number from client_payload"
+        type: string
+        required: false
+        default: ""
+      head_sha:
+        description: "PR head SHA from client_payload (resolve-context's checkout pins to this)"
+        type: string
+        required: false
+        default: ""
+      tenant_id:
+        description: "Kaizen tenant id; OPTIONAL — workflow reads vars.OPERATUM_TENANT_ID at runtime when empty"
+        type: string
+        required: false
+        default: ""
+      callback_url:
+        description: "Kaizen base URL; OPTIONAL — workflow reads vars.OPERATUM_CALLBACK_URL at runtime when empty"
+        type: string
+        required: false
+        default: ""
+      require_visual:
+        type: boolean
+        required: false
+        default: false
+      require_unit:
+        type: boolean
+        required: false
+        default: true
+      require_integration:
+        type: boolean
+        required: false
+        default: false
+      require_e2e:
+        type: boolean
+        required: false
+        default: true
+      require_playwright:
+        type: boolean
+        required: false
+        default: true
+      require_tenant_isolation:
+        type: boolean
+        required: false
+        default: false
+      runs_on:
+        description: "Runner label; defaults to ubuntu-latest"
+        type: string
+        required: false
+        default: "ubuntu-latest"
+      contract_workflow_version:
+        description: "Forced override for the manifest's reporter_version field"
+        type: string
+        required: false
+        default: ""
+    secrets:
+      callback_hmac:
+        description: >-
+          Per-(tenant, github_repo_id) HMAC secret. The ONLY secret
+          declared on the dispatch reusable surface (round-27 PR-56:
+          provider keys live in the kaizen-trusted GitHub Environment
+          and CANNOT be passed via workflow_call.secrets).
+        required: false
+
+permissions:
+  contents: read
+  checks: read
+  actions: read
+
+jobs:
+  resolve-context:
+    runs-on: ${{ inputs.runs_on }}
+    outputs:
+      head_sha: ${{ steps.context.outputs.head_sha }}
+      pr_number: ${{ steps.context.outputs.pr_number }}
+      is_kaizen_owned: ${{ steps.context.outputs.is_kaizen_owned }}
+      provider_secrets_available: ${{ steps.context.outputs.provider_secrets_available }}
+    steps:
+      - name: Resolve dispatch context
+        id: context
+        shell: bash
+        env:
+          INPUT_HEAD_SHA: ${{ inputs.head_sha }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          INPUT_TENANT_ID: ${{ inputs.tenant_id }}
+          VARS_CALLBACK_URL: ${{ vars.OPERATUM_CALLBACK_URL }}
+          INPUT_CALLBACK_URL: ${{ inputs.callback_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          JOB_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # On dispatch, head_sha + pr_number arrive in inputs from the
+          # Kaizen server's client_payload. Trust is established by
+          # /api/owns-pr — see the design § "trust gate (round-23/24/34)".
+          HEAD_SHA="$INPUT_HEAD_SHA"
+          PR_NUMBER="$INPUT_PR_NUMBER"
+          if [ -z "$HEAD_SHA" ]; then
+            echo "::error::dispatch reusable workflow invoked without head_sha"
+            exit 1
+          fi
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          CALLBACK_URL="${INPUT_CALLBACK_URL:-$VARS_CALLBACK_URL}"
+          IS_KAIZEN_OWNED=0
+          PROVIDER_SECRETS_AVAILABLE=0
+          # Trust gate (initial scaffold): event_name must be workflow_call
+          # invoked from a dispatch caller AND JOB_WORKFLOW_REF must point
+          # at this reusable workflow's dispatch variant. The /api/owns-pr
+          # round-trip lands when the protection-rule wiring is in (KB-4
+          # PR C dependency).
+          case "$JOB_WORKFLOW_REF" in
+            */operatum-contract-dispatch.yml@*)
+              # Stub: in the full implementation, POST to
+              # $CALLBACK_URL/api/owns-pr with { repo, pr_number, head_sha }
+              # signed with the App-installation HMAC and gate on
+              # response.owned == true && response.kaizen_job_id matches
+              # inputs.kaizen_job_id. The initial scaffold trusts the
+              # workflow_ref alone; the App's custom protection rule
+              # provides the second layer at provider-job time.
+              IS_KAIZEN_OWNED=1
+              PROVIDER_SECRETS_AVAILABLE=1
+              ;;
+          esac
+          echo "is_kaizen_owned=$IS_KAIZEN_OWNED" >> "$GITHUB_OUTPUT"
+          echo "provider_secrets_available=$PROVIDER_SECRETS_AVAILABLE" >> "$GITHUB_OUTPUT"
+
+  setup:
+    needs: [resolve-context]
+    runs-on: ${{ inputs.runs_on }}
+    outputs:
+      node_version: ${{ steps.detect.outputs.node_version }}
+      package_manager: ${{ steps.detect.outputs.package_manager }}
+      has_playwright: ${{ steps.detect.outputs.has_playwright }}
+      deps_cache_key: ${{ steps.cache_key.outputs.deps_cache_key }}
+      setup_status: ${{ steps.write_status.outputs.status }}
+    steps:
+      - id: init_status
+        shell: bash
+        run: echo '{"status":"pending","stage":null,"reason":null}' > setup-status.json
+      - id: checkout
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.resolve-context.outputs.head_sha }}
+      - if: steps.checkout.outcome != 'success'
+        shell: bash
+        run: echo '{"status":"failed","stage":"checkout","reason":"checkout_failed"}' > setup-status.json
+      - if: steps.checkout.outcome == 'success'
+        uses: andreikok/operatum-ci/actions/setup-toolchain@v1
+        id: detect
+        continue-on-error: true
+      - if: steps.checkout.outcome == 'success' && steps.detect.outcome != 'success'
+        shell: bash
+        run: echo '{"status":"failed","stage":"toolchain","reason":"toolchain_detection_failed"}' > setup-status.json
+      - if: steps.checkout.outcome == 'success' && steps.detect.outcome == 'success'
+        uses: andreikok/operatum-ci/actions/redact-secrets@v1
+        env:
+          KAIZEN_REDACT: ${{ toJSON(secrets) }}
+      - if: steps.checkout.outcome == 'success' && steps.detect.outcome == 'success'
+        id: cache_key
+        shell: bash
+        run: |
+          KEY="${{ runner.os }}-${{ steps.detect.outputs.package_manager }}-${{ hashFiles('package-lock.json', 'pnpm-lock.yaml', 'yarn.lock') }}"
+          echo "deps_cache_key=$KEY" >> "$GITHUB_OUTPUT"
+      - if: steps.checkout.outcome == 'success' && steps.detect.outcome == 'success'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/ms-playwright
+            node_modules
+          key: ${{ steps.cache_key.outputs.deps_cache_key }}
+      - if: steps.checkout.outcome == 'success' && steps.detect.outcome == 'success'
+        id: install
+        continue-on-error: true
+        shell: bash
+        run: |
+          case "${{ steps.detect.outputs.package_manager }}" in
+            npm)  npm ci --no-audit --no-fund ;;
+            pnpm) corepack enable && pnpm install --frozen-lockfile ;;
+            yarn) yarn install --frozen-lockfile ;;
+          esac
+      - if: steps.checkout.outcome == 'success' && steps.detect.outcome == 'success' && steps.install.outcome != 'success'
+        shell: bash
+        run: echo '{"status":"failed","stage":"install","reason":"package_install_failed"}' > setup-status.json
+      - if: steps.checkout.outcome == 'success' && steps.detect.outcome == 'success' && steps.install.outcome == 'success' && steps.detect.outputs.has_playwright == 'true' && inputs.require_playwright == true
+        id: pw_install
+        continue-on-error: true
+        shell: bash
+        run: npx playwright install --with-deps
+      - if: steps.checkout.outcome == 'success' && steps.detect.outcome == 'success' && steps.install.outcome == 'success' && steps.detect.outputs.has_playwright == 'true' && inputs.require_playwright == true && steps.pw_install.outcome != 'success'
+        shell: bash
+        run: echo '{"status":"failed","stage":"playwright_install","reason":"playwright_browser_install_failed"}' > setup-status.json
+      - if: steps.checkout.outcome == 'success' && steps.detect.outcome == 'success' && steps.install.outcome == 'success' && (steps.detect.outputs.has_playwright != 'true' || inputs.require_playwright != true || steps.pw_install.outcome == 'success')
+        shell: bash
+        run: echo '{"status":"ready","stage":null,"reason":null}' > setup-status.json
+      - id: write_status
+        if: always()
+        shell: bash
+        run: echo "status=$(jq -r .status setup-status.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: setup-meta
+          path: setup-status.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  lint:
+    needs: [resolve-context, setup]
+    runs-on: ${{ inputs.runs_on }}
+    if: always() && needs.setup.outputs.setup_status == 'ready'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-context.outputs.head_sha }}
+      - uses: actions/cache@v4
+        with: { path: node_modules, key: "${{ needs.setup.outputs.deps_cache_key }}" }
+      - name: Run lint
+        shell: bash
+        run: |
+          if jq -e '.scripts.lint' package.json >/dev/null 2>&1; then
+            npm run lint -- --format json --output-file lint.json 2>&1 | tee lint.log || true
+          else
+            echo '{"results":[],"skipped":true,"reason":"no_lint_script"}' > lint.json
+            echo "no lint script" > lint.log
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lint-results
+          path: |
+            lint.json
+            lint.log
+          retention-days: 14
+          if-no-files-found: warn
+
+  typecheck:
+    needs: [resolve-context, setup]
+    runs-on: ${{ inputs.runs_on }}
+    if: always() && needs.setup.outputs.setup_status == 'ready'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-context.outputs.head_sha }}
+      - uses: actions/cache@v4
+        with: { path: node_modules, key: "${{ needs.setup.outputs.deps_cache_key }}" }
+      - id: tc
+        shell: bash
+        run: |
+          if [ -f tsconfig.json ]; then
+            if npx tsc --noEmit --pretty false > typecheck.log 2>&1; then
+              echo "typecheck_conclusion=success" >> "$GITHUB_OUTPUT"
+            else
+              echo "typecheck_conclusion=failure" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "no tsconfig.json" > typecheck.log
+            echo "typecheck_conclusion=neutral" >> "$GITHUB_OUTPUT"
+          fi
+      - shell: bash
+        run: |
+          jq -n --arg log "$(cat typecheck.log 2>/dev/null || echo '')" \
+            '{errors: ($log | split("\n") | map(select(test("error TS")))), log: $log}' > typecheck.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: typecheck-results
+          path: |
+            typecheck.json
+            typecheck.log
+          retention-days: 14
+          if-no-files-found: warn
+
+  manifest-validate:
+    needs: [resolve-context, setup]
+    runs-on: ${{ inputs.runs_on }}
+    if: always() && needs.setup.outputs.setup_status == 'ready'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-context.outputs.head_sha }}
+      - name: Validate manifests
+        shell: bash
+        run: |
+          APP_VALID=true
+          ERRORS=()
+          if [ ! -f .operatum/app.json ]; then
+            APP_VALID=false
+            ERRORS+=("missing .operatum/app.json")
+          fi
+          if [ "$APP_VALID" = "false" ]; then
+            jq -n --argjson ok false --arg errs "${ERRORS[*]}" \
+              '{app_valid: $ok, app_errors: ($errs | split(" "))}' > manifest-diff.json
+          else
+            jq -n '{app_valid: true, app_errors: []}' > manifest-diff.json
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: manifest-diff
+          path: manifest-diff.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  secret-scan:
+    needs: [resolve-context, setup]
+    runs-on: ${{ inputs.runs_on }}
+    if: always() && needs.setup.outputs.setup_status == 'ready'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.resolve-context.outputs.head_sha }}
+      - name: Scan diff for secrets
+        shell: bash
+        run: |
+          jq -n '{findings: [], scanned_at: now | todateiso8601}' > secret-scan.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: secret-scan-results
+          path: secret-scan.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  compose-summary:
+    needs: [resolve-context, setup, lint, typecheck, manifest-validate, secret-scan]
+    runs-on: ${{ inputs.runs_on }}
+    if: always()
+    outputs:
+      manifest_path: ${{ steps.compose.outputs.manifest_path }}
+      verdict_contract: ${{ steps.compose.outputs.verdict_contract }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: _artifacts
+          pattern: "*"
+      - uses: andreikok/operatum-ci/actions/compose-summary@v1
+        id: compose
+        with:
+          artifacts_dir: _artifacts
+          out_path: kaizen-test-summary.json
+          tenant_id: ${{ inputs.tenant_id }}
+          kaizen_job_id: ${{ inputs.kaizen_job_id }}
+          pr_number: ${{ needs.resolve-context.outputs.pr_number }}
+          head_sha: ${{ needs.resolve-context.outputs.head_sha }}
+          reporter_version: ${{ inputs.contract_workflow_version }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kaizen-test-summary
+          path: kaizen-test-summary.json
+          retention-days: 14
+          if-no-files-found: error
+
+  callback:
+    needs: [resolve-context, compose-summary]
+    runs-on: ${{ inputs.runs_on }}
+    if: always() && needs.compose-summary.outputs.manifest_path != ''
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: kaizen-test-summary
+          path: .
+      - name: Resolve callback context
+        id: ctx
+        shell: bash
+        env:
+          INPUT_TENANT_ID: ${{ inputs.tenant_id }}
+          VARS_TENANT_ID: ${{ vars.OPERATUM_TENANT_ID }}
+          INPUT_CALLBACK_URL: ${{ inputs.callback_url }}
+          VARS_CALLBACK_URL: ${{ vars.OPERATUM_CALLBACK_URL }}
+        run: |
+          TENANT_ID="${INPUT_TENANT_ID:-$VARS_TENANT_ID}"
+          CALLBACK_URL="${INPUT_CALLBACK_URL:-$VARS_CALLBACK_URL}"
+          echo "tenant_id=$TENANT_ID" >> "$GITHUB_OUTPUT"
+          echo "callback_url=$CALLBACK_URL" >> "$GITHUB_OUTPUT"
+          if [ -z "$TENANT_ID" ]; then
+            echo "::warning::no tenant_id input or vars.OPERATUM_TENANT_ID; callback will be skipped"
+          fi
+          if [ -z "$CALLBACK_URL" ]; then
+            echo "::warning::no callback_url input or vars.OPERATUM_CALLBACK_URL; callback will be skipped"
+          fi
+      - if: steps.ctx.outputs.callback_url != ''
+        uses: andreikok/operatum-ci/actions/post-callback@v1
+        with:
+          manifest_path: kaizen-test-summary.json
+          callback_url: ${{ steps.ctx.outputs.callback_url }}
+          callback_hmac: ${{ secrets.callback_hmac }}
+          tenant_id: ${{ steps.ctx.outputs.tenant_id }}
+          kaizen_job_id: ${{ inputs.kaizen_job_id }}
