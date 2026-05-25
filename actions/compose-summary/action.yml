@@ -1,0 +1,70 @@
+name: compose-summary
+description: >-
+  Walks the downloaded `_artifacts/` tree and composes the
+  `kaizen-test-summary.json` manifest KB-5 specifies. The composer
+  is intentionally minimal in this PR — the full verdict-precedence
+  ladder (setup_failure → secret-in-diff → untrusted-PR markers →
+  preview-unavailable → missing-required-* → per-slot failures →
+  contract_pass) lands in a follow-up alongside the
+  JSON-Schema validation against `kaizen-test-summary.v1.json`.
+
+  The shape the composer emits matches KB-5's § "Manifest shape (v1)"
+  so the Kaizen `/api/webhooks/test-summary` ingest can parse it
+  immediately even before the full ladder is in place.
+
+inputs:
+  artifacts_dir:
+    description: "Where download-artifact wrote the artifact tree"
+    required: false
+    default: "_artifacts"
+  out_path:
+    description: "Where to write the composed manifest"
+    required: false
+    default: "kaizen-test-summary.json"
+  tenant_id:
+    description: "Echoed into manifest.tenant_id; empty → omitted"
+    required: false
+    default: ""
+  kaizen_job_id:
+    description: "Echoed into manifest.kaizen_job_id; empty → omitted"
+    required: false
+    default: ""
+  pr_number:
+    description: "Echoed into manifest.pr.number"
+    required: false
+    default: ""
+  head_sha:
+    description: "Echoed into manifest.pr.head_sha"
+    required: false
+    default: ""
+  reporter_version:
+    description: "Echoed into manifest.reporter_version; never github.ref_name"
+    required: false
+    default: ""
+
+outputs:
+  manifest_path:
+    description: "Path to the composed manifest"
+    value: ${{ steps.compose.outputs.manifest_path }}
+  verdict_contract:
+    description: "Top-level contract verdict ('success' | 'failure' | 'neutral')"
+    value: ${{ steps.compose.outputs.verdict_contract }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compose manifest
+      id: compose
+      shell: bash
+      env:
+        ARTIFACTS_DIR: ${{ inputs.artifacts_dir }}
+        OUT_PATH: ${{ inputs.out_path }}
+        TENANT_ID: ${{ inputs.tenant_id }}
+        KAIZEN_JOB_ID: ${{ inputs.kaizen_job_id }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        HEAD_SHA: ${{ inputs.head_sha }}
+        REPORTER_VERSION: ${{ inputs.reporter_version }}
+        GITHUB_RUN_ID: ${{ github.run_id }}
+        GITHUB_REPO: ${{ github.repository }}
+        GITHUB_WORKFLOW_REF: ${{ github.workflow_ref }}
+      run: node "${{ github.action_path }}/compose.mjs"

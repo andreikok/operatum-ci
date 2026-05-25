@@ -1,0 +1,52 @@
+name: post-callback
+description: >-
+  Reads the composed kaizen-test-summary.json manifest, computes
+  an HMAC-SHA256 over the RAW bytes (never re-serialised — the
+  HMAC matches what the Kaizen server validates against the same
+  raw bytes it receives), and POSTs it to
+  $CALLBACK_URL/api/webhooks/test-summary with three custom
+  headers + Content-Type.
+
+  Retry posture (round-7 PR-56 review): 3 attempts with
+  exponential backoff (1s/2s/4s) on network errors and 5xx
+  responses; 4xx responses are NOT retried (the server told us
+  the request shape is wrong; a retry won't fix it).
+
+  HMAC-missing posture: if no `callback_hmac` secret was forwarded
+  AND no `KAIZEN_CALLBACK_HMAC` fallback exists, emit a workflow
+  warning and exit 0 (bootstrap-race tolerance per the design's
+  § "skips with a warning when HMAC secret absent" rule).
+
+inputs:
+  manifest_path:
+    description: "Path to the composed kaizen-test-summary.json"
+    required: false
+    default: "kaizen-test-summary.json"
+  callback_url:
+    description: "Kaizen base URL; the action appends /api/webhooks/test-summary"
+    required: true
+  callback_hmac:
+    description: "The HMAC secret. Empty → callback is skipped with a warning."
+    required: false
+    default: ""
+  tenant_id:
+    description: "Echoed in the X-Operatum-Tenant-Id header"
+    required: false
+    default: ""
+  kaizen_job_id:
+    description: "Echoed in the X-Operatum-Kaizen-Job-Id header"
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: POST manifest
+      shell: bash
+      env:
+        MANIFEST_PATH: ${{ inputs.manifest_path }}
+        CALLBACK_URL: ${{ inputs.callback_url }}
+        CALLBACK_HMAC: ${{ inputs.callback_hmac }}
+        TENANT_ID: ${{ inputs.tenant_id }}
+        KAIZEN_JOB_ID: ${{ inputs.kaizen_job_id }}
+      run: node "${{ github.action_path }}/post.mjs"
