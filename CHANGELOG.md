@@ -1,0 +1,58 @@
+# Changelog
+
+All notable changes to operatum-ci are documented in this file. The
+format is one entry per release tag. Pre-release scaffolding is
+captured under the **Unreleased** heading until the first `v1.0.0`
+release pipeline runs.
+
+## [Unreleased]
+
+### Added (KB-7 PR B — initial scaffold)
+
+- Repository scaffold: `VERSION`, `LICENSE` (MIT), `README.md`,
+  `package.json` (Node test runner + `fast-xml-parser` + `js-yaml`),
+  `.gitignore`.
+- Two reusable workflows: `operatum-contract-pr.yml` (pull_request
+  callable) and `operatum-contract-dispatch.yml` (repository_dispatch
+  callable). Both carry the shared `workflow_call.inputs` block per
+  the design doc § "Input contract"; PR variant declares only
+  `callback_hmac` in `workflow_call.secrets`; dispatch variant
+  same, with `environment: kaizen-trusted` on the tenant-test
+  provider-jobs (provider-jobs deferred — see Unreleased / Deferred).
+- Four composite actions:
+  - `setup-toolchain/` — detects Node version + package manager
+    from the tenant lockfile.
+  - `redact-secrets/` — emits one `::add-mask::` per secret in
+    `KAIZEN_REDACT` so later step output is masked.
+  - `compose-summary/` — composes `kaizen-test-summary.json` from
+    per-job artifacts (initial composer; full verdict-precedence
+    ladder deferred).
+  - `post-callback/` — POSTs the manifest to Kaizen with an HMAC
+    bearer over the raw bytes; retries 5xx + network errors with
+    exponential backoff.
+- Cheap fan-in jobs (lint, typecheck, manifest-validate, secret-scan)
+  emitted into both reusable workflows.
+- `compose-summary` + `callback` always-runs fan-in tail.
+- Self-test workflow stub (`.github/workflows/self-test.yml`).
+
+### Deferred
+
+The plan at
+`operatum-kaizen/plans/kb-7-pr-b-implementation-plan.md` defines
+18 commits; this initial scaffold lands the first ~6. The
+following land in follow-up PRs against this same repo:
+
+- Marker-job split for the four tenant-test slots (commits 5-7
+  of the plan), with the round-35/36/37/38/40/41 predicate
+  corrections (EXPECTED_TO_RUN + distinct artifact names +
+  per-reusable `needs:` divergence).
+- `preview-deploy` + `log-capture` jobs.
+- Full verdict-precedence ladder in `compose-summary` + JSON-Schema
+  validation against `kaizen-test-summary.v1.json`.
+- `scripts/generate-workflows.js` + `scripts/validate-workflows.js`
+  with assertions (a)-(m). The current workflow YAMLs are
+  hand-written; the generator will reproduce them deterministically
+  and the validator will pin the marker DAG invariants.
+- Release pipeline (`release.yml`) with composite-ref stamping.
+- Full integration self-test fixtures (`fixtures/minimal-app/`
+  + `fixtures/_artifacts-snapshots/`).

@@ -1,0 +1,19 @@
+{
+  "name": "operatum-ci",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reusable GitHub Actions workflow pack for operatum-managed repos. Not published to npm — the deliverable is the .github/workflows/ + actions/ tree, consumed via `uses: andreikok/operatum-ci/...@v1`.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test --test-reporter=spec test/compose-summary.test.mjs test/post-callback.test.mjs test/setup-toolchain.test.mjs",
+    "validate": "node scripts/validate-workflows.js"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.0",
+    "js-yaml": "^4.1.0"
+  }
+}
