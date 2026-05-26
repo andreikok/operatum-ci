@@ -67,6 +67,14 @@ test('package.json engines.node overrides default node_version', () => {
   assert.equal(parsed.node_version, '22');
 });
 
+test('.nvmrc wins over package.json engines.node when both are present', () => {
+  const { parsed } = runDetect({
+    '.nvmrc': '20\n',
+    'package.json': JSON.stringify({ engines: { node: '>=18' } }),
+  });
+  assert.equal(parsed.node_version, '20');
+});
+
 test('@playwright/test in devDependencies sets has_playwright=true', () => {
   const { parsed } = runDetect({
     'package.json': JSON.stringify({

@@ -144,26 +144,9 @@ jobs:
           # (mirrors the marker-job's pattern at L416). Also makes
           # CALLBACK_URL "used" so actionlint's SC2034 stays quiet.
           echo "callback_url=$CALLBACK_URL" >> "$GITHUB_OUTPUT"
+          # TODO(KB-7 follow-up): wire /api/owns-pr authenticated ownership check; until then fail closed.
           IS_KAIZEN_OWNED=0
           PROVIDER_SECRETS_AVAILABLE=0
-          # Trust gate (initial scaffold): event_name must be workflow_call
-          # invoked from a dispatch caller AND JOB_WORKFLOW_REF must point
-          # at this reusable workflow's dispatch variant. The /api/owns-pr
-          # round-trip lands when the protection-rule wiring is in (KB-4
-          # PR C dependency).
-          case "$JOB_WORKFLOW_REF" in
-            */operatum-contract-dispatch.yml@*)
-              # Stub: in the full implementation, POST to
-              # $CALLBACK_URL/api/owns-pr with { repo, pr_number, head_sha }
-              # signed with the App-installation HMAC and gate on
-              # response.owned == true && response.kaizen_job_id matches
-              # inputs.kaizen_job_id. The initial scaffold trusts the
-              # workflow_ref alone; the App's custom protection rule
-              # provides the second layer at provider-job time.
-              IS_KAIZEN_OWNED=1
-              PROVIDER_SECRETS_AVAILABLE=1
-              ;;
-          esac
           echo "is_kaizen_owned=$IS_KAIZEN_OWNED" >> "$GITHUB_OUTPUT"
           echo "provider_secrets_available=$PROVIDER_SECRETS_AVAILABLE" >> "$GITHUB_OUTPUT"
 

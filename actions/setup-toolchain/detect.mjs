@@ -52,7 +52,7 @@ if (existsSync(join(cwd, 'pnpm-lock.yaml'))) {
 // package-lock.json → npm (the default).
 
 // ── Node version — prefer .nvmrc, then package.json#engines.node. ──
-let nodeVersion = '20';
+let nodeVersion = '';
 if (existsSync(join(cwd, '.nvmrc'))) {
   const raw = readFileSync(join(cwd, '.nvmrc'), 'utf8').trim();
   // Accept '20', 'v20', '20.11.1', 'lts/iron'. We extract the major.
@@ -60,11 +60,12 @@ if (existsSync(join(cwd, '.nvmrc'))) {
   if (match) nodeVersion = match[1];
 }
 const pkg = readJSONSafe(join(cwd, 'package.json'));
-if (pkg?.engines?.node) {
+if (!nodeVersion && pkg?.engines?.node) {
   // engines.node like '>=20', '20.x', '^20.11.0'. Extract first integer.
   const match = String(pkg.engines.node).match(/(\d+)/);
   if (match) nodeVersion = match[1];
 }
+if (!nodeVersion) nodeVersion = '20';
 
 // ── Playwright presence — controls the conditional install step. ──
 const deps = { ...(pkg?.dependencies || {}), ...(pkg?.devDependencies || {}) };
