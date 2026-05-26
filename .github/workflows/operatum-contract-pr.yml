@@ -124,14 +124,17 @@ jobs:
           # fallback (kept for symmetry with the dispatch variant).
           HEAD_SHA="${INPUT_HEAD_SHA:-$EVENT_HEAD_SHA}"
           PR_NUMBER="${INPUT_PR_NUMBER:-$EVENT_PR_NUMBER}"
-          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
-          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           # PR reusable: no provider secrets are available regardless of
           # ownership (no job declares `environment: kaizen-trusted`).
           # is_kaizen_owned is informational here; the marker-jobs use
           # it to emit reason=pr_workflow_surface vs untrusted_pr.
-          echo "is_kaizen_owned=0" >> "$GITHUB_OUTPUT"
-          echo "provider_secrets_available=0" >> "$GITHUB_OUTPUT"
+          # Grouped redirect to satisfy shellcheck SC2129.
+          {
+            echo "head_sha=$HEAD_SHA"
+            echo "pr_number=$PR_NUMBER"
+            echo "is_kaizen_owned=0"
+            echo "provider_secrets_available=0"
+          } >> "$GITHUB_OUTPUT"
 
   setup:
     needs: [resolve-context]

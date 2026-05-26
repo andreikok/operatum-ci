@@ -138,6 +138,12 @@ jobs:
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
           echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           CALLBACK_URL="${INPUT_CALLBACK_URL:-$VARS_CALLBACK_URL}"
+          # Export for the downstream POST /api/owns-pr step that lands
+          # in the KB-4 PR C dependency. Pre-export makes the future
+          # implementation pull from steps.ctx.outputs.callback_url
+          # (mirrors the marker-job's pattern at L416). Also makes
+          # CALLBACK_URL "used" so actionlint's SC2034 stays quiet.
+          echo "callback_url=$CALLBACK_URL" >> "$GITHUB_OUTPUT"
           IS_KAIZEN_OWNED=0
           PROVIDER_SECRETS_AVAILABLE=0
           # Trust gate (initial scaffold): event_name must be workflow_call
