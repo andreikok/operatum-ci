@@ -1,5 +1,141 @@
-# operatum-ci
+# operatum-ci — reusable GitHub Actions workflow pack
 
-Reusable GitHub Actions workflow pack for operatum-managed
-repositories. See PR #1 (KB-7 PR B initial scaffold) for the full
-README and the in-progress workflow tree.
+The CI substrate for repositories Kaizen bootstraps. Ships two
+reusable workflows + four composite actions that any tenant repo
+consumes through a one-line `uses:` from the caller workflow
+Kaizen writes at bootstrap time.
+
+The design that justifies every shape in this repo lives in
+[`operatum-kaizen/docs/workflow-pack-design.md`][design] —
+4,634 lines, the source of truth for the marker-job DAG, the
+verdict-precedence ladder, the trust-boundary split between the
+pull_request and dispatch reusable workflows, and the manifest
+schema this pack emits.
+
+[design]: https://github.com/andreikok/operatum-kaizen/blob/main/docs/workflow-pack-design.md
+
+## What ships here
+
+```
+.github/workflows/
+  operatum-contract-pr.yml         # reusable workflow — pull_request callable
+  operatum-contract-dispatch.yml   # reusable workflow — repository_dispatch callable
+  self-test.yml                    # CI for operatum-ci itself
+  release.yml                      # tag-cutting on merge to main (deferred)
+actions/
+  compose-summary/                 # composite — composes kaizen-test-summary.json
+  post-callback/                   # composite — HMAC-signed POST to Kaizen
+  redact-secrets/                  # composite — emits ::add-mask:: for every secret
+  setup-toolchain/                 # composite — detects Node + package manager
+fixtures/
+  minimal-app/                     # used by self-test.yml
+VERSION                            # one line: "v1" — the major-version contract
+```
+
+The two reusable workflows differ ONLY in their secret surface and
+in which jobs they emit (per the round-17 trust-split + round-35
+marker-job split documented in the design):
+
+- **`operatum-contract-pr.yml`** is invoked from the caller written
+  by KB-2 on the `pull_request` trigger. Its `workflow_call.secrets`
+  declares ONLY `callback_hmac`. No job declares `environment:
+  kaizen-trusted`, so provider-keyed `${{ secrets.OPENAI_TEST_API_KEY }}`
+  references resolve to empty even if a PR author edits the caller
+  to map them — the trust boundary is enforced by GitHub's schema
+  layer, not by caller good behaviour.
+- **`operatum-contract-dispatch.yml`** is invoked from the caller
+  written by KB-2 on the `repository_dispatch` trigger from the
+  Kaizen server. Its tenant-test jobs declare `environment:
+  kaizen-trusted`; provider keys live in that environment's secret
+  store and are read directly. The App's custom protection rule
+  approves the deployment only when `/api/owns-pr` confirms the
+  Kaizen server owns the PR.
+
+## Consumer pattern
+
+The caller workflow KB-2 writes into a bootstrapped tenant repo
+references this pack by tag:
+
+```yaml
+# .github/workflows/operatum-contract.yml — tenant repo
+name: operatum-contract
+on:
+  pull_request:
+permissions:
+  contents: read
+  checks: read
+  actions: read
+jobs:
+  contract:
+    uses: andreikok/operatum-ci/.github/workflows/operatum-contract-pr.yml@v1
+    with:
+      target_type: app
+    secrets:
+      callback_hmac: ${{ secrets.KAIZEN_CALLBACK_HMAC }}
+```
+
+The dispatch caller is the same shape with `operatum-contract-dispatch.yml@v1`.
+
+## Versioning policy
+
+Three-tier pin model, matching the GitHub Actions ecosystem norm
+(e.g. `actions/checkout@v4`):
+
+| Pin form | Resolution | Audience |
+|---|---|---|
+| `@v1` | moving tag — always the latest `v1.x.y` release | tenants (default) |
+| `@v1.2.3` | specific release | tenants who want byte-pinning |
+| `@<40-hex-sha>` | exact commit | security-sensitive tenants |
+| `@main` | tip of main | **not supported for tenants**; only the self-test uses it |
+
+Every merge to `main` cuts a new patch release (`release.yml`,
+deferred to a follow-up commit), bumps the patch, writes a tag
+`v1.x.y`, then force-moves the `v1` tag to the same commit. The
+`v1` tag is the auto-upgrade seam for tenants who pin at `@v1`.
+
+**Composite-action ref pinning.** The release workflow stamps every
+`andreikok/operatum-ci/actions/<name>@v1` reference in the workflow
+YAML to `@v1.2.3` BEFORE the tag commit — so a tenant pinned at a
+release tag or a commit SHA executes that release's composite
+actions, byte-frozen. A tenant pinned at `@v1` executes the latest
+`v1.x.y` composites, moving in lockstep with the workflow.
+
+In the `main` branch, composite refs are written as `@v1` so the
+workflow can be tested against the latest composites during
+development.
+
+## Breaking changes
+
+A breaking change cuts `v2`. Tenants on `@v1` keep their pin until
+they explicitly edit it. KB-2's bootstrap will not silently rewrite
+a tenant's caller workflow.
+
+## Changelog
+
+Every PR to this repo MUST update [`CHANGELOG.md`](./CHANGELOG.md).
+The reviewer rule pins changelog presence as a required check.
+
+## Status (KB-7 PR B initial)
+
+This PR is the **scaffold** for the workflow pack: the two reusable
+workflows are present with the documented `workflow_call` input +
+secret shape from the design doc and the cheap-fan-in jobs
+(resolve-context, setup, lint, typecheck, manifest-validate,
+secret-scan, compose-summary, callback). The four composite actions
+are present with working implementations.
+
+**Deferred to follow-up PRs in this same repo** (per the plan's
+commit ladder — see
+`operatum-kaizen/plans/kb-7-pr-b-implementation-plan.md`):
+
+- Provider-job + marker-job split for the four tenant-test slots
+  (commits 5-7 of the plan: unit-tests, integration-tests, e2e,
+  visual + four marker siblings, with the round-35/36/37/38/40/41
+  predicate corrections).
+- `preview-deploy` + `log-capture` jobs.
+- Full `compose-summary` verdict-precedence ladder + JSON-Schema
+  validation against `kaizen-test-summary.v1.json`.
+- `scripts/validate-workflows.js` with assertions (a)-(m) +
+  `scripts/generate-workflows.js` generator.
+- Release pipeline (`release.yml`) with composite-ref stamping.
+- Integration self-test fixtures.

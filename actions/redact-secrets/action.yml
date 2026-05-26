@@ -1,0 +1,58 @@
+name: redact-secrets
+description: >-
+  Reads $KAIZEN_REDACT (a JSON object whose values are secret
+  strings — typically `${{ toJSON(secrets) }}` from the caller)
+  and emits one `::add-mask::<value>::` per non-empty value.
+  Runs BEFORE any other step that might echo a secret to logs;
+  this is the architecture-line-626 "test workflows must redact
+  secrets from logs" surface.
+
+  Mask emission is JOB-LOCAL — every job that handles a secret
+  declares this action as its first step. The setup job calls it
+  once with `${{ toJSON(secrets) }}`; tenant-test jobs call it
+  again after `project-tenant-secrets` projects per-job env.
+
+runs:
+  using: composite
+  steps:
+    - name: Emit add-mask for every secret
+      shell: bash
+      env:
+        KAIZEN_REDACT: ${{ env.KAIZEN_REDACT }}
+      run: |
+        # The composite reads $KAIZEN_REDACT from the caller's env;
+        # a missing/empty payload is NOT an error (a job with no
+        # secrets is a legitimate case — every workflow declares
+        # the action uniformly to keep the pattern grep-able).
+        if [ -z "${KAIZEN_REDACT:-}" ] || [ "${KAIZEN_REDACT}" = "null" ]; then
+          echo "redact-secrets: no secrets in scope; nothing to mask"
+          exit 0
+        fi
+        # Parse the JSON object and emit ::add-mask:: per non-empty
+        # string value.  Use a single `node -e` to avoid jq's
+        # dependency footprint (jq is available on ubuntu-latest but
+        # we'd rather not depend on it for a security-critical step).
+        node -e '
+          const raw = process.env.KAIZEN_REDACT || "{}";
+          let obj;
+          try { obj = JSON.parse(raw); }
+          catch (err) {
+            console.error("redact-secrets: KAIZEN_REDACT is not JSON; refusing to proceed");
+            process.exit(1);
+          }
+          if (obj === null || typeof obj !== "object") {
+            console.error("redact-secrets: KAIZEN_REDACT must be a JSON object");
+            process.exit(1);
+          }
+          let count = 0;
+          for (const [name, value] of Object.entries(obj)) {
+            if (typeof value !== "string" || value.length === 0) continue;
+            // GitHub'\''s ::add-mask:: command rewrites later log
+            // output to replace the literal value with ***. The
+            // command itself is recognised on stdout in a workflow
+            // step; we emit one per secret.
+            console.log("::add-mask::" + value);
+            count += 1;
+          }
+          console.log("redact-secrets: masked " + count + " value(s)");
+        '
