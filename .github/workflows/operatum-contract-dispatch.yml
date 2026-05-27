@@ -375,19 +375,48 @@ jobs:
         shell: bash
         run: |
           # See operatum-contract-pr.yml § playwright-suite-drift for
-          # the full rationale on `--if-present` + fail-closed posture.
+          # the full rationale on `--if-present` + fail-closed posture
+          # + JSON-artifact emit (PR-2 review round-1, R-ci-pr-2-R1-1).
           set -o pipefail
-          if npm run test:playwright-drift --if-present 2>&1 | tee playwright-drift.log; then
-            echo "drift_conclusion=success" >> "$GITHUB_OUTPUT"
+          if node -e 'const p=require("./package.json"); process.exit((p.scripts && p.scripts["test:playwright-drift"]) ? 0 : 1)' 2>/dev/null; then
+            drift_present=1
           else
-            echo "drift_conclusion=failure" >> "$GITHUB_OUTPUT"
+            drift_present=0
+          fi
+          if npm run test:playwright-drift --if-present 2>&1 | tee playwright-drift.log; then
+            rc=0
+          else
+            rc=$?
+          fi
+          if [ "$drift_present" -eq 0 ]; then
+            result=skipped
+          elif [ "$rc" -eq 0 ]; then
+            result=success
+          else
+            result=failure
+          fi
+          summary="$(awk 'NF{line=$0} END{print line}' playwright-drift.log | cut -c1-256)"
+          DRIFT_RESULT="$result" DRIFT_RC="$rc" DRIFT_SUMMARY="$summary" \
+            node -e '
+              const fs = require("node:fs");
+              const payload = {
+                result: process.env.DRIFT_RESULT,
+                exit_code: Number(process.env.DRIFT_RC),
+              };
+              if (process.env.DRIFT_SUMMARY) payload.summary = process.env.DRIFT_SUMMARY;
+              fs.writeFileSync("playwright-drift.json", JSON.stringify(payload) + "\n");
+            '
+          echo "drift_conclusion=$result" >> "$GITHUB_OUTPUT"
+          if [ "$result" = "failure" ]; then
             exit 1
           fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: playwright-drift-results
-          path: playwright-drift.log
+          path: |
+            playwright-drift.log
+            playwright-drift.json
           retention-days: 14
           if-no-files-found: warn
 

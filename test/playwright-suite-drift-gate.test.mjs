@@ -101,4 +101,45 @@ for (const wf of WORKFLOWS) {
     assert.ok(uploadStep, 'job must upload a log artifact for reviewer visibility');
     assert.equal(uploadStep.with?.name, 'playwright-drift-results');
   });
+
+  // PR-2 review round-1 (R-ci-pr-2-R1-1): drift failure must reach the
+  // composer, not just the GH-Actions job outcome. The drift step writes
+  // a machine-readable `playwright-drift.json` alongside the log, and the
+  // upload step ships BOTH. compose-summary classifies a `failure` result
+  // as `contract_drift` in kaizen-test-summary.json. A regression that
+  // drops the JSON emit or the JSON path on the upload step fires here.
+  test(`${wf}: playwright-suite-drift writes playwright-drift.json`, () => {
+    const job = loadWorkflow(wf).jobs['playwright-suite-drift'];
+    const allRun = (job.steps || [])
+      .map((s) => s.run || '')
+      .join('\n');
+    assert.match(
+      allRun,
+      /playwright-drift\.json/,
+      'must emit a machine-readable playwright-drift.json so '
+      + 'compose-summary can classify the manifest verdict — see '
+      + 'actions/compose-summary/compose.mjs § playwright-suite-drift signal',
+    );
+  });
+
+  test(`${wf}: upload-artifact ships both playwright-drift.log and playwright-drift.json`, () => {
+    const job = loadWorkflow(wf).jobs['playwright-suite-drift'];
+    const uploadStep = (job.steps || []).find(
+      (s) => typeof s.uses === 'string' && s.uses.startsWith('actions/upload-artifact@'),
+    );
+    assert.ok(uploadStep, 'expected an upload-artifact step');
+    const pathField = String(uploadStep.with?.path ?? '');
+    assert.match(
+      pathField,
+      /playwright-drift\.log/,
+      'upload must include playwright-drift.log (reviewer log)',
+    );
+    assert.match(
+      pathField,
+      /playwright-drift\.json/,
+      'upload must include playwright-drift.json (composer signal) — '
+      + 'without it the composer falls back to the no-signal path and a '
+      + 'tenant drift failure surfaces as verdict.contract.result=success',
+    );
+  });
 }
