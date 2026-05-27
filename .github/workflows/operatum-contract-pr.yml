@@ -343,8 +343,117 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
+  playwright-suite-drift:
+    # Cross-repo half of release-readiness WORK ITEM-C1
+    # (plans/release-readiness-plan.md § 6.1).
+    #
+    # Invokes the tenant repo's `npm run test:playwright-drift` gate
+    # — the named npm script wired in operatum-kaizen PR #70 fixup
+    # fae4cc1 (Playwright suite drift checker at
+    # src/scripts/check-playwright-suite-drift.js). The checker exits
+    # non-zero when generated Playwright suites under
+    # tests/playwright/kaizen/ have drifted from .operatum/test-
+    # contract.json — i.e. a PR edited the generated fixtures OR
+    # the contract without regenerating both. We want THAT failure
+    # to surface HERE rather than as a downstream test failure with
+    # no breadcrumb back to the contract.
+    #
+    # Tenant safety: `npm run --if-present` is the npm 6+ flag that
+    # exits 0 when the named script is absent. Tenant repos that
+    # have NOT shipped C14 (i.e. their package.json declares no
+    # `test:playwright-drift` script) see a no-op — NO failure, NO
+    # spurious yellow check. The gate activates the moment a tenant
+    # adds the script, with zero coordinated rollout work.
+    #
+    # Ordering rationale: this runs as a sibling of lint / typecheck
+    # / manifest-validate / secret-scan (all gated on
+    # setup_status == 'ready', i.e. AFTER `npm ci` succeeded in the
+    # `setup` job). When the marker-jobs that run `npm test` land in
+    # the KB-7 follow-up (per L13-L18 of this file), they will depend
+    # on `setup` the same way; this gate races them on the runner
+    # pool but resolves before the manifest composer aggregates a
+    # verdict, so drift surfaces in the kaizen-test-summary.json with
+    # its own classified reason rather than as a generic test failure.
+    needs: [resolve-context, setup]
+    runs-on: ${{ inputs.runs_on }}
+    if: always() && needs.setup.outputs.setup_status == 'ready'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-context.outputs.head_sha }}
+      - uses: actions/cache@v4
+        with: { path: node_modules, key: "${{ needs.setup.outputs.deps_cache_key }}" }
+      - id: drift
+        shell: bash
+        run: |
+          # `npm run --if-present <name>` was added in npm 6 and is
+          # the canonical "no-op when absent" affordance. We capture
+          # stdout+stderr into a log artifact so reviewers can read
+          # the checker's diff output when it fires. The script's
+          # own non-zero exit propagates through npm and fails the
+          # step — fail-closed is the correct posture for a drift
+          # gate (silent skip on absence is fine; silent skip on
+          # presence-but-error is NOT).
+          #
+          # We ALSO emit a machine-readable `playwright-drift.json`
+          # with shape { result, exit_code, summary } so the
+          # compose-summary composer can classify the manifest
+          # verdict instead of leaning solely on the GH-Actions job
+          # outcome (PR-2 review round-1, R-ci-pr-2-R1-1). The JSON
+          # write happens BEFORE the explicit `exit 1` so the
+          # always()-gated upload step picks it up on failure too.
+          set -o pipefail
+          # Detect script presence so we can emit `skipped` for
+          # pre-C14 tenant repos (back-compat with the workflow-shape
+          # tested in test/playwright-suite-drift-gate.test.mjs).
+          if node -e 'const p=require("./package.json"); process.exit((p.scripts && p.scripts["test:playwright-drift"]) ? 0 : 1)' 2>/dev/null; then
+            drift_present=1
+          else
+            drift_present=0
+          fi
+          if npm run test:playwright-drift --if-present 2>&1 | tee playwright-drift.log; then
+            rc=0
+          else
+            rc=$?
+          fi
+          if [ "$drift_present" -eq 0 ]; then
+            result=skipped
+          elif [ "$rc" -eq 0 ]; then
+            result=success
+          else
+            result=failure
+          fi
+          # One-liner summary: last non-empty log line, trimmed.
+          summary="$(awk 'NF{line=$0} END{print line}' playwright-drift.log | cut -c1-256)"
+          DRIFT_RESULT="$result" DRIFT_RC="$rc" DRIFT_SUMMARY="$summary" \
+            node -e '
+              const fs = require("node:fs");
+              const payload = {
+                result: process.env.DRIFT_RESULT,
+                exit_code: Number(process.env.DRIFT_RC),
+              };
+              if (process.env.DRIFT_SUMMARY) payload.summary = process.env.DRIFT_SUMMARY;
+              fs.writeFileSync("playwright-drift.json", JSON.stringify(payload) + "\n");
+            '
+          echo "drift_conclusion=$result" >> "$GITHUB_OUTPUT"
+          if [ "$result" = "failure" ]; then
+            # Re-surface the failure to GitHub Actions. Without the
+            # explicit exit, `set -o pipefail` + tee already failed
+            # the step, but we make it explicit for grep-ability.
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-drift-results
+          path: |
+            playwright-drift.log
+            playwright-drift.json
+          retention-days: 14
+          if-no-files-found: warn
+
   compose-summary:
-    needs: [resolve-context, setup, lint, typecheck, manifest-validate, secret-scan]
+    needs: [resolve-context, setup, lint, typecheck, manifest-validate, secret-scan, playwright-suite-drift]
     runs-on: ${{ inputs.runs_on }}
     if: always()
     outputs:

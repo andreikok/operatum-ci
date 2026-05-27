@@ -84,7 +84,38 @@ if (verdictContract !== 'failure' && buckets['manifest-diff']) {
   }
 }
 
-// ── 3. Unit-tests JUnit parse (informational; the full per-slot
+// ── 3. Playwright-suite-drift signal. The drift job writes BOTH a
+//       human-readable `playwright-drift.log` (for reviewer eyes)
+//       AND a machine-readable `playwright-drift.json` with shape
+//       { result: 'success'|'failure'|'skipped', exit_code: <n>,
+//         summary?: '<one-liner>' }. We classify a `failure` here so
+//       the manifest/callback path agrees with the GH Actions job
+//       outcome (per PR-2 review round-1, R-ci-pr-2-R1-1: without
+//       this step a tenant drift failure failed the GH job but
+//       still emitted verdict.contract.result=success and Kaizen
+//       was told the contract passed).
+//
+//       Missing artifact (pre-C14 tenant repos or back-compat with
+//       runs that pre-date the JSON emit step) is treated as "no
+//       signal" — verdict unchanged. `skipped` is also a no-op.
+//       Only `failure` flips the verdict, and only when no higher-
+//       precedence failure (setup_failure, contract_invalid) has
+//       already won. ──
+if (verdictContract !== 'failure' && buckets['playwright-drift-results']) {
+  const drift = readJSONSafe(
+    join(buckets['playwright-drift-results'], 'playwright-drift.json'),
+  );
+  if (drift && drift.result === 'failure') {
+    verdictContract = 'failure';
+    verdictReason = 'contract_drift';
+    const summary = typeof drift.summary === 'string' && drift.summary
+      ? drift.summary
+      : `exit_code=${drift.exit_code ?? 'unknown'}`;
+    auditNotes.push(`contract_drift: ${summary.slice(0, 256)}`);
+  }
+}
+
+// ── 4. Unit-tests JUnit parse (informational; the full per-slot
 //       failure ladder lands in a follow-up). ──
 let tests = { total: 0, passed: 0, failed: 0, skipped: 0 };
 const unitJunitPath = buckets['unit-results']
@@ -115,7 +146,7 @@ if (unitJunitPath && existsSync(unitJunitPath)) {
   }
 }
 
-// ── 4. Build the manifest. KB-5 § "Manifest shape (v1)" pins the
+// ── 5. Build the manifest. KB-5 § "Manifest shape (v1)" pins the
 //       shape; we emit a subset and let the follow-up commits fill
 //       in artifacts[] and the full verdict block. ──
 const manifest = {

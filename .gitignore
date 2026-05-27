@@ -4,3 +4,6 @@ node_modules/
 .DS_Store
 coverage/
 _artifacts/
+# self-test workflow downloads actionlint into the repo root; ignored
+# so a local actionlint run doesn't dirty the worktree.
+/actionlint

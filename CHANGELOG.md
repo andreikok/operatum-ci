@@ -7,6 +7,24 @@ release pipeline runs.
 
 ## [Unreleased]
 
+### Added (release-readiness WORK ITEM-C1 cross-repo half)
+
+- `playwright-suite-drift` job added to both reusable workflows
+  (`operatum-contract-pr.yml` + `operatum-contract-dispatch.yml`).
+  Invokes the tenant's `npm run test:playwright-drift --if-present`
+  — wired in operatum-kaizen PR #70 fixup fae4cc1 (the C14 drift
+  checker at `src/scripts/check-playwright-suite-drift.js`). The
+  `--if-present` flag makes the gate a no-op for tenant repos that
+  haven't shipped the script yet; the gate activates the moment a
+  tenant adds it, with zero coordinated rollout. Sits alongside
+  lint / typecheck / manifest-validate / secret-scan in the cheap
+  fan-in and blocks `compose-summary` so drift surfaces in the
+  manifest verdict rather than as a downstream test failure.
+- `test/playwright-suite-drift-gate.test.mjs` — workflow-shape
+  drift pin (5 assertions × 2 workflows = 10 tests) that catches
+  regressions deleting the job, dropping `--if-present`, or
+  forgetting to wire `compose-summary`.
+
 ### Added (KB-7 PR B — initial scaffold)
 
 - Repository scaffold: `VERSION`, `LICENSE` (MIT), `README.md`,
