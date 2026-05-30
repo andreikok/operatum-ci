@@ -139,3 +139,5 @@ commit ladder — see
   `scripts/generate-workflows.js` generator.
 - Release pipeline (`release.yml`) with composite-ref stamping.
 - Integration self-test fixtures.
+
+_operatum-ci self-execution loop confirmed live._
