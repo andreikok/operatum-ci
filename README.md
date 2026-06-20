@@ -13,7 +13,8 @@ Kaizen writes at bootstrap time.
 > pipeline that currently differs from the published bytes (a richer
 > composite-action chain vs the inlined published version) and are NOT
 > necessarily what apps run. Reconciling app-CI to this richer
-> pipeline, if ever wanted, is a separate operatum-kaizen item.
+> pipeline, if ever wanted, is a separate operatum-kaizen item. See
+> [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full resolution.
 
 The design that justifies every shape in this repo lives in
 [`operatum-kaizen/docs/workflow-pack-design.md`][design] —

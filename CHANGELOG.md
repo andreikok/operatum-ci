@@ -26,6 +26,11 @@ release pipeline runs.
   `src/lib/reusable-contract-workflows.js` and published to
   `operatum-ai/operatum-ci@v1`, and that the `.github/workflows/*.yml`
   here are a reference pipeline that currently differs.
+- Added `ARCHITECTURE.md` carrying the repo-local architecture summary
+  and the canonical-source / divergence **resolution** note (the repo
+  had no `ARCHITECTURE.md`; the plan's change #3 named one as a
+  documentation target, so it is created here with the resolution
+  rather than left absent).
 
 ### Added (release-readiness WORK ITEM-C1 cross-repo half)
 
