@@ -282,7 +282,7 @@ test('reporter_version falls back to workflow_ref @suffix, never github.ref_name
       artifactsDir,
       outPath,
       env: {
-        GITHUB_WORKFLOW_REF: 'andreikok/operatum-ci/.github/workflows/operatum-contract-pr.yml@v1.2.3',
+        GITHUB_WORKFLOW_REF: 'operatum-ai/operatum-ci/.github/workflows/operatum-contract-pr.yml@v1.2.3',
       },
     });
     assert.equal(result.status, 0, result.stderr);
