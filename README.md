@@ -104,15 +104,20 @@ deferred to a follow-up commit), bumps the patch, writes a tag
 `v1.x.y`, then force-moves the `v1` tag to the same commit. The
 `v1` tag is the auto-upgrade seam for tenants who pin at `@v1`.
 
-**Composite-action ref pinning.** The release workflow stamps every
+**Composite-action ref pinning.** This applies to the **reference
+pipeline in this repo only** — the canonical workflows apps run are
+the kaizen-generated published bytes, which inline this logic and carry
+no internal composite-action `uses:` (see the **Canonical source**
+callout at the top of this README and [`ARCHITECTURE.md`](./ARCHITECTURE.md)).
+Within the reference pipeline, the release workflow stamps every
 `operatum-ai/operatum-ci/actions/<name>@v1` reference in the workflow
-YAML to `@v1.2.3` BEFORE the tag commit — so a tenant pinned at a
+YAML to `@v1.2.3` BEFORE the tag commit — so a consumer pinned at a
 release tag or a commit SHA executes that release's composite
-actions, byte-frozen. A tenant pinned at `@v1` executes the latest
-`v1.x.y` composites, moving in lockstep with the workflow.
+actions, byte-frozen. A consumer pinned at `@v1` executes the latest
+`v1.x.y` composites, moving in lockstep with the reference workflow.
 
 In the `main` branch, composite refs are written as `@v1` so the
-workflow can be tested against the latest composites during
+reference workflow can be tested against the latest composites during
 development.
 
 ## Breaking changes

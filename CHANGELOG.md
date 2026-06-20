@@ -31,6 +31,10 @@ release pipeline runs.
   had no `ARCHITECTURE.md`; the plan's change #3 named one as a
   documentation target, so it is created here with the resolution
   rather than left absent).
+- Clarified the README "Composite-action ref pinning" note: it now
+  states the pinning behavior applies to the in-repo reference pipeline
+  only, while the kaizen-generated published bytes (which inline the
+  logic and carry no internal composite-action `uses:`) are canonical.
 
 ### Added (release-readiness WORK ITEM-C1 cross-repo half)
 
