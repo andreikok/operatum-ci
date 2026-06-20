@@ -2,7 +2,7 @@
   "name": "operatum-ci",
   "version": "1.0.0",
   "private": true,
-  "description": "Reusable GitHub Actions workflow pack for operatum-managed repos. Not published to npm — the deliverable is the .github/workflows/ + actions/ tree, consumed via `uses: andreikok/operatum-ci/...@v1`.",
+  "description": "Reusable GitHub Actions workflow pack for operatum-managed repos. Not published to npm — the deliverable is the .github/workflows/ + actions/ tree, consumed via `uses: operatum-ai/operatum-ci/...@v1`.",
   "license": "MIT",
   "type": "module",
   "engines": {
