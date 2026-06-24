@@ -9,7 +9,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test --test-reporter=spec test/compose-summary.test.mjs test/post-callback.test.mjs test/setup-toolchain.test.mjs test/playwright-suite-drift-gate.test.mjs",
+    "test": "node --test --test-reporter=spec test/compose-summary.test.mjs test/post-callback.test.mjs test/setup-toolchain.test.mjs test/playwright-suite-drift-gate.test.mjs test/reusable-workflow-owner.test.mjs",
     "validate": "node scripts/validate-workflows.js"
   },
   "dependencies": {
